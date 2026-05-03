@@ -1,0 +1,751 @@
+import { useState, useEffect } from "react";
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+const uid = () => Math.random().toString(36).slice(2, 9);
+const today = () => new Date().toISOString().split("T")[0];
+const fmt = (d) => new Date(d + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+const fmtShort = (d) => new Date(d + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+
+const COLORS = {
+  primary: "#2563EB",
+  primaryLight: "#DBEAFE",
+  primaryMid: "#93C5FD",
+  accent: "#0EA5E9",
+  bg: "#F0F6FF",
+  surface: "#FFFFFF",
+  border: "#BFDBFE",
+  text: "#1E3A5F",
+  muted: "#64748B",
+  success: "#10B981",
+  warning: "#F59E0B",
+  danger: "#EF4444",
+};
+
+const STATUS_MAP = {
+  agendada: { label: "Agendada", color: COLORS.accent, bg: "#E0F2FE" },
+  concluida: { label: "Concluída", color: COLORS.success, bg: "#D1FAE5" },
+  cancelada: { label: "Cancelada", color: COLORS.danger, bg: "#FEE2E2" },
+};
+
+const SEED_PSICOLOGOS = [
+  { id: "psi1", nome: "Dra. Ana Costa", especialidade: "Ansiedade e Depressão", crp: "06/123456", avatar: "AC" },
+  { id: "psi2", nome: "Dr. Bruno Melo",  especialidade: "Terapia Cognitivo-Comportamental", crp: "06/654321", avatar: "BM" },
+  { id: "psi3", nome: "Dra. Cláudia Lima", especialidade: "Relacionamentos e Família", crp: "06/789012", avatar: "CL" },
+];
+
+const HORARIOS = ["08:00","09:00","10:00","11:00","14:00","15:00","16:00","17:00"];
+
+// ── storage helpers ───────────────────────────────────────────────────────────
+async function load(key) {
+  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
+}
+async function save(key, val) {
+  try { await window.storage.set(key, JSON.stringify(val)); } catch {}
+}
+
+// ── styles ───────────────────────────────────────────────────────────────────
+const S = {
+  app: {
+    minHeight: "100vh",
+    background: `linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 50%, #EFF6FF 100%)`,
+    fontFamily: "'Georgia', 'Times New Roman', serif",
+    color: COLORS.text,
+  },
+  card: {
+    background: COLORS.surface,
+    borderRadius: 16,
+    border: `1px solid ${COLORS.border}`,
+    boxShadow: "0 4px 24px rgba(37,99,235,0.08)",
+    padding: 24,
+  },
+  btn: (variant = "primary") => ({
+    padding: "10px 20px",
+    borderRadius: 10,
+    border: "none",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 14,
+    fontWeight: 600,
+    transition: "all 0.2s",
+    ...(variant === "primary" ? { background: COLORS.primary, color: "#fff" } :
+        variant === "ghost"   ? { background: "transparent", color: COLORS.primary, border: `1.5px solid ${COLORS.border}` } :
+        variant === "danger"  ? { background: COLORS.danger, color: "#fff" } :
+        variant === "success" ? { background: COLORS.success, color: "#fff" } :
+        { background: COLORS.primaryLight, color: COLORS.primary }),
+  }),
+  input: {
+    width: "100%",
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: `1.5px solid ${COLORS.border}`,
+    fontFamily: "inherit",
+    fontSize: 14,
+    color: COLORS.text,
+    background: "#F8FBFF",
+    boxSizing: "border-box",
+    outline: "none",
+  },
+  label: { fontSize: 13, fontWeight: 600, color: COLORS.muted, marginBottom: 4, display: "block" },
+  badge: (status) => ({
+    display: "inline-block",
+    padding: "3px 10px",
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: 700,
+    background: STATUS_MAP[status]?.bg || "#F1F5F9",
+    color: STATUS_MAP[status]?.color || COLORS.muted,
+  }),
+  avatar: (size = 42) => ({
+    width: size, height: size,
+    borderRadius: "50%",
+    background: `linear-gradient(135deg, ${COLORS.primary}, ${COLORS.accent})`,
+    color: "#fff",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontWeight: 700, fontSize: size * 0.35,
+    flexShrink: 0,
+  }),
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPONENTES GLOBAIS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function Navbar({ user, onLogout }) {
+  return (
+    <nav style={{
+      background: COLORS.surface,
+      borderBottom: `1px solid ${COLORS.border}`,
+      padding: "0 24px",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      height: 64,
+      position: "sticky", top: 0, zIndex: 100,
+      boxShadow: "0 2px 12px rgba(37,99,235,0.07)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 22, color: COLORS.primary }}>🧠</div>
+        <span style={{ fontSize: 20, fontWeight: 700, color: COLORS.primary, letterSpacing: -0.5 }}>PsicoAtende</span>
+      </div>
+      {user && (
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={S.avatar(34)}>{user.nome?.charAt(0)}</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{user.nome}</div>
+            <div style={{ fontSize: 11, color: COLORS.muted }}>{user.tipo === "paciente" ? "Paciente" : "Psicólogo(a)"}</div>
+          </div>
+          <button onClick={onLogout} style={{ ...S.btn("ghost"), padding: "6px 14px", fontSize: 13 }}>Sair</button>
+        </div>
+      )}
+    </nav>
+  );
+}
+
+function Toast({ msg, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+      background: COLORS.primary, color: "#fff",
+      padding: "12px 20px", borderRadius: 12,
+      boxShadow: "0 8px 32px rgba(37,99,235,0.25)",
+      fontSize: 14, fontWeight: 600,
+      animation: "slideUp 0.3s ease",
+    }}>
+      ✓ {msg}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TELA INICIAL — ESCOLHA DE PERFIL
+// ══════════════════════════════════════════════════════════════════════════════
+function WelcomeScreen({ onSelect }) {
+  return (
+    <div style={{ minHeight: "100vh", background: S.app.background, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ maxWidth: 520, width: "100%", textAlign: "center" }}>
+        <div style={{ fontSize: 52, marginBottom: 8 }}>🧠</div>
+        <h1 style={{ fontSize: 36, fontWeight: 800, color: COLORS.primary, margin: "0 0 4px", letterSpacing: -1 }}>PsicoAtende</h1>
+        <p style={{ color: COLORS.muted, marginBottom: 40, fontSize: 16 }}>Plataforma de Atendimento Psicológico Online</p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 32 }}>
+          {[
+            { tipo: "paciente", icon: "👤", titulo: "Sou Paciente", desc: "Agende consultas e cuide da sua saúde mental" },
+            { tipo: "psicologo", icon: "🩺", titulo: "Sou Psicólogo(a)", desc: "Gerencie agenda, pacientes e prontuários" },
+          ].map(o => (
+            <button key={o.tipo} onClick={() => onSelect(o.tipo)} style={{
+              background: COLORS.surface, border: `2px solid ${COLORS.border}`, borderRadius: 18,
+              padding: "28px 16px", cursor: "pointer", textAlign: "center",
+              transition: "all 0.2s", fontFamily: "inherit",
+            }}
+              onMouseOver={e => { e.currentTarget.style.borderColor = COLORS.primary; e.currentTarget.style.boxShadow = `0 8px 32px rgba(37,99,235,0.15)`; }}
+              onMouseOut={e => { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.boxShadow = "none"; }}
+            >
+              <div style={{ fontSize: 36, marginBottom: 10 }}>{o.icon}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.text, marginBottom: 6 }}>{o.titulo}</div>
+              <div style={{ fontSize: 13, color: COLORS.muted, lineHeight: 1.4 }}>{o.desc}</div>
+            </button>
+          ))}
+        </div>
+
+        <p style={{ fontSize: 12, color: COLORS.muted }}>Seus dados são protegidos e confidenciais.</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTH — PACIENTE
+// ══════════════════════════════════════════════════════════════════════════════
+function AuthPaciente({ pacientes, onLogin, onCadastro, onBack }) {
+  const [modo, setModo] = useState("login");
+  const [form, setForm] = useState({ nome: "", email: "", telefone: "" });
+  const [err, setErr] = useState("");
+
+  function handleLogin() {
+    const p = pacientes.find(x => x.email.toLowerCase() === form.email.toLowerCase());
+    if (!p) { setErr("Email não encontrado. Cadastre-se primeiro."); return; }
+    onLogin(p);
+  }
+  function handleCadastro() {
+    if (!form.nome || !form.email || !form.telefone) { setErr("Preencha todos os campos."); return; }
+    const novo = { id: uid(), nome: form.nome, email: form.email, telefone: form.telefone, tipo: "paciente" };
+    onCadastro(novo);
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: S.app.background, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ ...S.card, maxWidth: 420, width: "100%" }}>
+        <button onClick={onBack} style={{ ...S.btn("ghost"), padding: "6px 12px", fontSize: 13, marginBottom: 20 }}>← Voltar</button>
+        <div style={{ fontSize: 28, marginBottom: 4 }}>👤</div>
+        <h2 style={{ margin: "0 0 20px", color: COLORS.primary }}>{modo === "login" ? "Entrar como Paciente" : "Cadastro de Paciente"}</h2>
+
+        {modo === "cadastro" && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={S.label}>Nome completo</label>
+            <input style={S.input} value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} placeholder="Seu nome" />
+          </div>
+        )}
+        <div style={{ marginBottom: 14 }}>
+          <label style={S.label}>Email</label>
+          <input style={S.input} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="seu@email.com" />
+        </div>
+        {modo === "cadastro" && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={S.label}>Telefone</label>
+            <input style={S.input} value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} placeholder="(00) 00000-0000" />
+          </div>
+        )}
+        {err && <p style={{ color: COLORS.danger, fontSize: 13, margin: "0 0 12px" }}>{err}</p>}
+        <button onClick={modo === "login" ? handleLogin : handleCadastro} style={{ ...S.btn(), width: "100%", padding: "12px", fontSize: 15 }}>
+          {modo === "login" ? "Entrar" : "Cadastrar"}
+        </button>
+        <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: COLORS.muted }}>
+          {modo === "login" ? "Não tem conta? " : "Já tem conta? "}
+          <span onClick={() => { setModo(modo === "login" ? "cadastro" : "login"); setErr(""); }} style={{ color: COLORS.primary, cursor: "pointer", fontWeight: 700 }}>
+            {modo === "login" ? "Cadastre-se" : "Entre aqui"}
+          </span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTH — PSICÓLOGO
+// ══════════════════════════════════════════════════════════════════════════════
+function AuthPsicologo({ psicologos, onLogin, onBack }) {
+  const [sel, setSel] = useState("");
+  const [err, setErr] = useState("");
+
+  function handleLogin() {
+    const p = psicologos.find(x => x.id === sel);
+    if (!p) { setErr("Selecione um profissional."); return; }
+    onLogin({ ...p, tipo: "psicologo" });
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: S.app.background, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ ...S.card, maxWidth: 440, width: "100%" }}>
+        <button onClick={onBack} style={{ ...S.btn("ghost"), padding: "6px 12px", fontSize: 13, marginBottom: 20 }}>← Voltar</button>
+        <div style={{ fontSize: 28, marginBottom: 4 }}>🩺</div>
+        <h2 style={{ margin: "0 0 20px", color: COLORS.primary }}>Acesso de Psicólogo(a)</h2>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={S.label}>Selecione seu perfil</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {psicologos.map(p => (
+              <div key={p.id} onClick={() => setSel(p.id)} style={{
+                display: "flex", alignItems: "center", gap: 14,
+                padding: "12px 16px", borderRadius: 12, cursor: "pointer",
+                border: `2px solid ${sel === p.id ? COLORS.primary : COLORS.border}`,
+                background: sel === p.id ? COLORS.primaryLight : COLORS.surface,
+                transition: "all 0.15s",
+              }}>
+                <div style={S.avatar(38)}>{p.avatar}</div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nome}</div>
+                  <div style={{ fontSize: 12, color: COLORS.muted }}>{p.especialidade}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {err && <p style={{ color: COLORS.danger, fontSize: 13, margin: "0 0 12px" }}>{err}</p>}
+        <button onClick={handleLogin} style={{ ...S.btn(), width: "100%", padding: "12px" }}>Acessar Painel</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAINEL PACIENTE
+// ══════════════════════════════════════════════════════════════════════════════
+function PainelPaciente({ user, consultas, psicologos, onAgendar, onLogout }) {
+  const [aba, setAba] = useState("inicio");
+  const [agendForm, setAgendForm] = useState({ psicologo: "", data: "", hora: "" });
+  const [err, setErr] = useState("");
+  const [showToast, setShowToast] = useState(false);
+
+  const minhasCons = consultas.filter(c => c.pacienteId === user.id);
+  const proximas = minhasCons.filter(c => c.status === "agendada" && c.data >= today()).sort((a, b) => a.data.localeCompare(b.data));
+  const historico = minhasCons.filter(c => c.status !== "agendada" || c.data < today()).sort((a, b) => b.data.localeCompare(a.data));
+
+  function handleAgendar() {
+    if (!agendForm.psicologo || !agendForm.data || !agendForm.hora) { setErr("Preencha todos os campos."); return; }
+    if (agendForm.data < today()) { setErr("Escolha uma data futura."); return; }
+    const conflict = consultas.find(c => c.psicologoId === agendForm.psicologo && c.data === agendForm.data && c.hora === agendForm.hora && c.status === "agendada");
+    if (conflict) { setErr("Horário indisponível para este psicólogo."); return; }
+    const psi = psicologos.find(p => p.id === agendForm.psicologo);
+    const nova = {
+      id: uid(), pacienteId: user.id, pacienteNome: user.nome,
+      psicologoId: agendForm.psicologo, psicologoNome: psi?.nome,
+      data: agendForm.data, hora: agendForm.hora, status: "agendada",
+      link: `https://meet.psico.app/${uid()}`,
+    };
+    onAgendar(nova);
+    setAgendForm({ psicologo: "", data: "", hora: "" });
+    setErr(""); setShowToast(true);
+    setAba("proximas");
+  }
+
+  const abas = [
+    { id: "inicio", icon: "🏠", label: "Início" },
+    { id: "agendar", icon: "📅", label: "Agendar" },
+    { id: "proximas", icon: "🕐", label: `Próximas (${proximas.length})` },
+    { id: "historico", icon: "📋", label: "Histórico" },
+  ];
+
+  return (
+    <div style={S.app}>
+      <Navbar user={user} onLogout={onLogout} />
+      {showToast && <Toast msg="Consulta agendada com sucesso!" onClose={() => setShowToast(false)} />}
+
+      {/* Tab bar */}
+      <div style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, display: "flex", overflowX: "auto" }}>
+        {abas.map(a => (
+          <button key={a.id} onClick={() => setAba(a.id)} style={{
+            padding: "14px 20px", border: "none", background: "transparent", cursor: "pointer",
+            fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+            color: aba === a.id ? COLORS.primary : COLORS.muted,
+            borderBottom: `3px solid ${aba === a.id ? COLORS.primary : "transparent"}`,
+            whiteSpace: "nowrap",
+          }}>
+            {a.icon} {a.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px" }}>
+
+        {/* INÍCIO */}
+        {aba === "inicio" && (
+          <div>
+            <h2 style={{ margin: "0 0 6px", color: COLORS.primary }}>Olá, {user.nome.split(" ")[0]}! 👋</h2>
+            <p style={{ color: COLORS.muted, marginBottom: 24 }}>Bem-vindo(a) ao PsicoAtende. Cuide da sua saúde mental.</p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 28 }}>
+              {[
+                { label: "Próximas consultas", val: proximas.length, icon: "📅", color: COLORS.primary },
+                { label: "Consultas realizadas", val: minhasCons.filter(c => c.status === "concluida").length, icon: "✅", color: COLORS.success },
+                { label: "Psicólogos disponíveis", val: psicologos.length, icon: "🩺", color: COLORS.accent },
+              ].map((s, i) => (
+                <div key={i} style={{ ...S.card, textAlign: "center", padding: 20 }}>
+                  <div style={{ fontSize: 28, marginBottom: 6 }}>{s.icon}</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.val}</div>
+                  <div style={{ fontSize: 12, color: COLORS.muted }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {proximas.length > 0 ? (
+              <div>
+                <h3 style={{ margin: "0 0 14px", fontSize: 16 }}>Próxima consulta</h3>
+                <ConsultaCard c={proximas[0]} isPaciente />
+              </div>
+            ) : (
+              <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📅</div>
+                <p style={{ color: COLORS.muted, marginBottom: 16 }}>Você não tem consultas agendadas.</p>
+                <button onClick={() => setAba("agendar")} style={S.btn()}>Agendar minha primeira consulta</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* AGENDAR */}
+        {aba === "agendar" && (
+          <div style={S.card}>
+            <h3 style={{ margin: "0 0 20px", color: COLORS.primary }}>📅 Agendar Consulta</h3>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={S.label}>Psicólogo(a)</label>
+              <select style={S.input} value={agendForm.psicologo} onChange={e => setAgendForm({ ...agendForm, psicologo: e.target.value })}>
+                <option value="">Selecione um profissional</option>
+                {psicologos.map(p => <option key={p.id} value={p.id}>{p.nome} — {p.especialidade}</option>)}
+              </select>
+            </div>
+
+            {agendForm.psicologo && (
+              <div style={{ ...S.card, background: COLORS.primaryLight, border: `1px solid ${COLORS.primaryMid}`, marginBottom: 16, padding: 14 }}>
+                {(() => { const p = psicologos.find(x => x.id === agendForm.psicologo); return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={S.avatar(40)}>{p?.avatar}</div>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{p?.nome}</div>
+                      <div style={{ fontSize: 12, color: COLORS.muted }}>{p?.especialidade} · CRP {p?.crp}</div>
+                    </div>
+                  </div>
+                ); })()}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+              <div>
+                <label style={S.label}>Data</label>
+                <input style={S.input} type="date" min={today()} value={agendForm.data} onChange={e => setAgendForm({ ...agendForm, data: e.target.value })} />
+              </div>
+              <div>
+                <label style={S.label}>Horário</label>
+                <select style={S.input} value={agendForm.hora} onChange={e => setAgendForm({ ...agendForm, hora: e.target.value })}>
+                  <option value="">Selecione</option>
+                  {HORARIOS.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {err && <p style={{ color: COLORS.danger, fontSize: 13, margin: "0 0 12px" }}>{err}</p>}
+            <button onClick={handleAgendar} style={{ ...S.btn(), width: "100%", padding: 12, fontSize: 15 }}>Confirmar Agendamento</button>
+          </div>
+        )}
+
+        {/* PRÓXIMAS */}
+        {aba === "proximas" && (
+          <div>
+            <h3 style={{ margin: "0 0 16px", color: COLORS.primary }}>🕐 Próximas Consultas</h3>
+            {proximas.length === 0 ? (
+              <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
+                <p style={{ color: COLORS.muted }}>Nenhuma consulta agendada.</p>
+                <button onClick={() => setAba("agendar")} style={{ ...S.btn(), marginTop: 12 }}>Agendar agora</button>
+              </div>
+            ) : proximas.map(c => <ConsultaCard key={c.id} c={c} isPaciente />)}
+          </div>
+        )}
+
+        {/* HISTÓRICO */}
+        {aba === "historico" && (
+          <div>
+            <h3 style={{ margin: "0 0 16px", color: COLORS.primary }}>📋 Histórico de Consultas</h3>
+            {historico.length === 0 ? (
+              <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
+                <p style={{ color: COLORS.muted }}>Nenhum histórico encontrado.</p>
+              </div>
+            ) : historico.map(c => <ConsultaCard key={c.id} c={c} isPaciente />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── card de consulta ──────────────────────────────────────────────────────────
+function ConsultaCard({ c, isPaciente, onStatusChange, onAddNota, notas }) {
+  const [showNota, setShowNota] = useState(false);
+  const [nota, setNota] = useState("");
+
+  return (
+    <div style={{ ...S.card, marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <div style={S.avatar(44)}>{isPaciente ? c.psicologoNome?.charAt(0) : c.pacienteNome?.charAt(0)}</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{isPaciente ? c.psicologoNome : c.pacienteNome}</div>
+            <div style={{ fontSize: 13, color: COLORS.muted }}>
+              {fmt(c.data)} às {c.hora}
+            </div>
+          </div>
+        </div>
+        <span style={S.badge(c.status)}>{STATUS_MAP[c.status]?.label}</span>
+      </div>
+
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {isPaciente && c.status === "agendada" && (
+          <a href={c.link} target="_blank" rel="noreferrer" style={{ ...S.btn("success"), textDecoration: "none", fontSize: 13, padding: "8px 14px" }}>
+            🎥 Entrar na Sessão
+          </a>
+        )}
+        {!isPaciente && c.status === "agendada" && (
+          <>
+            <button onClick={() => onStatusChange(c.id, "concluida")} style={{ ...S.btn("success"), fontSize: 13, padding: "7px 12px" }}>✓ Concluída</button>
+            <button onClick={() => onStatusChange(c.id, "cancelada")} style={{ ...S.btn("danger"), fontSize: 13, padding: "7px 12px" }}>✗ Cancelar</button>
+            <button onClick={() => setShowNota(!showNota)} style={{ ...S.btn("light"), fontSize: 13, padding: "7px 12px" }}>📝 Nota</button>
+          </>
+        )}
+      </div>
+
+      {showNota && !isPaciente && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${COLORS.border}`, paddingTop: 14 }}>
+          <label style={S.label}>Nota de Sessão</label>
+          <textarea style={{ ...S.input, minHeight: 80, resize: "vertical" }} value={nota} onChange={e => setNota(e.target.value)} placeholder="Observações clínicas..." />
+          <button onClick={() => { if (nota.trim()) { onAddNota({ id: uid(), consultaId: c.id, pacienteId: c.pacienteId, pacienteNome: c.pacienteNome, psicologoId: c.psicologoId, observacoes: nota, data: today() }); setNota(""); setShowNota(false); } }} style={{ ...S.btn(), marginTop: 8, fontSize: 13, padding: "8px 16px" }}>
+            Salvar Nota
+          </button>
+        </div>
+      )}
+
+      {notas?.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
+          {notas.map(n => (
+            <div key={n.id} style={{ background: "#FAFBFF", borderRadius: 8, padding: "8px 12px", marginBottom: 6, fontSize: 13 }}>
+              <span style={{ fontWeight: 600, color: COLORS.muted, fontSize: 11 }}>{fmt(n.data)}</span>
+              <p style={{ margin: "4px 0 0", color: COLORS.text }}>{n.observacoes}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAINEL PSICÓLOGO
+// ══════════════════════════════════════════════════════════════════════════════
+function PainelPsicologo({ user, consultas, pacientes, notas, onStatusChange, onAddNota, onLogout }) {
+  const [aba, setAba] = useState("agenda");
+  const [showToast, setShowToast] = useState(false);
+  const [dataFiltro, setDataFiltro] = useState(today());
+
+  const minhasCons = consultas.filter(c => c.psicologoId === user.id);
+  const agendaDia = minhasCons.filter(c => c.data === dataFiltro).sort((a, b) => a.hora.localeCompare(b.hora));
+  const meusPacientesIds = [...new Set(minhasCons.map(c => c.pacienteId))];
+  const meusPacientes = pacientes.filter(p => meusPacientesIds.includes(p.id));
+
+  function handleAddNota(nota) { onAddNota(nota); setShowToast(true); }
+
+  const abas = [
+    { id: "agenda", icon: "📅", label: "Agenda" },
+    { id: "pacientes", icon: "👥", label: `Pacientes (${meusPacientes.length})` },
+    { id: "prontuarios", icon: "📋", label: "Prontuários" },
+  ];
+
+  return (
+    <div style={S.app}>
+      <Navbar user={user} onLogout={onLogout} />
+      {showToast && <Toast msg="Nota salva no prontuário!" onClose={() => setShowToast(false)} />}
+
+      <div style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, display: "flex" }}>
+        {abas.map(a => (
+          <button key={a.id} onClick={() => setAba(a.id)} style={{
+            padding: "14px 20px", border: "none", background: "transparent", cursor: "pointer",
+            fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+            color: aba === a.id ? COLORS.primary : COLORS.muted,
+            borderBottom: `3px solid ${aba === a.id ? COLORS.primary : "transparent"}`,
+          }}>
+            {a.icon} {a.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px" }}>
+
+        {/* AGENDA */}
+        {aba === "agenda" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+              <h3 style={{ margin: 0, color: COLORS.primary }}>📅 Agenda do Dia</h3>
+              <input type="date" style={{ ...S.input, width: "auto" }} value={dataFiltro} onChange={e => setDataFiltro(e.target.value)} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 24 }}>
+              {[
+                { label: "Agendadas", val: agendaDia.filter(c => c.status === "agendada").length, color: COLORS.accent },
+                { label: "Concluídas", val: agendaDia.filter(c => c.status === "concluida").length, color: COLORS.success },
+                { label: "Canceladas", val: agendaDia.filter(c => c.status === "cancelada").length, color: COLORS.danger },
+              ].map((s, i) => (
+                <div key={i} style={{ ...S.card, textAlign: "center", padding: 16 }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color }}>{s.val}</div>
+                  <div style={{ fontSize: 12, color: COLORS.muted }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {agendaDia.length === 0 ? (
+              <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
+                <p style={{ color: COLORS.muted }}>Nenhuma consulta neste dia.</p>
+              </div>
+            ) : agendaDia.map(c => (
+              <ConsultaCard key={c.id} c={c}
+                notas={notas.filter(n => n.consultaId === c.id)}
+                onStatusChange={onStatusChange}
+                onAddNota={handleAddNota}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* PACIENTES */}
+        {aba === "pacientes" && (
+          <div>
+            <h3 style={{ margin: "0 0 16px", color: COLORS.primary }}>👥 Meus Pacientes</h3>
+            {meusPacientes.length === 0 ? (
+              <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
+                <p style={{ color: COLORS.muted }}>Nenhum paciente ainda.</p>
+              </div>
+            ) : meusPacientes.map(p => {
+              const pc = minhasCons.filter(c => c.pacienteId === p.id);
+              const ultima = pc.sort((a, b) => b.data.localeCompare(a.data))[0];
+              return (
+                <div key={p.id} style={{ ...S.card, marginBottom: 12 }}>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                    <div style={S.avatar(44)}>{p.nome.charAt(0)}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{p.nome}</div>
+                      <div style={{ fontSize: 13, color: COLORS.muted }}>📧 {p.email} · 📱 {p.telefone}</div>
+                      <div style={{ fontSize: 12, color: COLORS.muted, marginTop: 2 }}>
+                        {pc.length} consulta(s) · Última: {ultima ? fmtShort(ultima.data) : "—"}
+                      </div>
+                    </div>
+                    <span style={S.badge(ultima?.status || "agendada")}>{STATUS_MAP[ultima?.status]?.label || "—"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* PRONTUÁRIOS */}
+        {aba === "prontuarios" && (
+          <div>
+            <h3 style={{ margin: "0 0 16px", color: COLORS.primary }}>📋 Prontuários</h3>
+            {notas.filter(n => n.psicologoId === user.id).length === 0 ? (
+              <div style={{ ...S.card, textAlign: "center", padding: 40 }}>
+                <p style={{ color: COLORS.muted }}>Nenhuma nota de sessão registada.</p>
+              </div>
+            ) : (
+              (() => {
+                const byPaciente = {};
+                notas.filter(n => n.psicologoId === user.id).forEach(n => {
+                  if (!byPaciente[n.pacienteId]) byPaciente[n.pacienteId] = { nome: n.pacienteNome, notas: [] };
+                  byPaciente[n.pacienteId].notas.push(n);
+                });
+                return Object.entries(byPaciente).map(([pid, data]) => (
+                  <div key={pid} style={{ ...S.card, marginBottom: 16 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                      <div style={S.avatar(36)}>{data.nome.charAt(0)}</div>
+                      <div style={{ fontWeight: 700 }}>{data.nome}</div>
+                    </div>
+                    {data.notas.sort((a, b) => b.data.localeCompare(a.data)).map(n => (
+                      <div key={n.id} style={{ borderLeft: `3px solid ${COLORS.primaryMid}`, paddingLeft: 14, marginBottom: 10 }}>
+                        <div style={{ fontSize: 12, color: COLORS.muted, fontWeight: 600 }}>{fmt(n.data)}</div>
+                        <p style={{ margin: "4px 0 0", fontSize: 14 }}>{n.observacoes}</p>
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// APP ROOT
+// ══════════════════════════════════════════════════════════════════════════════
+export default function App() {
+  const [screen, setScreen] = useState("welcome"); // welcome | authPaciente | authPsicologo
+  const [user, setUser]     = useState(null);
+  const [pacientes, setPacientes] = useState([]);
+  const [consultas, setConsultas] = useState([]);
+  const [notas, setNotas]         = useState([]);
+  const [loaded, setLoaded]       = useState(false);
+
+  // load from storage
+  useEffect(() => {
+    (async () => {
+      const p = await load("psicoatende_pacientes");
+      const c = await load("psicoatende_consultas");
+      const n = await load("psicoatende_notas");
+      if (p) setPacientes(p);
+      if (c) setConsultas(c);
+      if (n) setNotas(n);
+      setLoaded(true);
+    })();
+  }, []);
+
+  async function addPaciente(p) {
+    const novos = [...pacientes, p];
+    setPacientes(novos);
+    await save("psicoatende_pacientes", novos);
+    setUser(p); setScreen("app");
+  }
+  async function addConsulta(c) {
+    const novas = [...consultas, c];
+    setConsultas(novas);
+    await save("psicoatende_consultas", novas);
+  }
+  async function updateStatus(id, status) {
+    const novas = consultas.map(c => c.id === id ? { ...c, status } : c);
+    setConsultas(novas);
+    await save("psicoatende_consultas", novas);
+  }
+  async function addNota(n) {
+    const novas = [...notas, n];
+    setNotas(novas);
+    await save("psicoatende_notas", novas);
+  }
+
+  function logout() { setUser(null); setScreen("welcome"); }
+
+  if (!loaded) return <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+    <div style={{ color: COLORS.primary, fontSize: 18 }}>🧠 A carregar PsicoAtende…</div>
+  </div>;
+
+  if (screen === "welcome") return <WelcomeScreen onSelect={tipo => setScreen(tipo === "paciente" ? "authPaciente" : "authPsicologo")} />;
+
+  if (screen === "authPaciente") return (
+    <AuthPaciente pacientes={pacientes}
+      onLogin={p => { setUser({ ...p, tipo: "paciente" }); setScreen("app"); }}
+      onCadastro={addPaciente}
+      onBack={() => setScreen("welcome")} />
+  );
+
+  if (screen === "authPsicologo") return (
+    <AuthPsicologo psicologos={SEED_PSICOLOGOS}
+      onLogin={p => { setUser(p); setScreen("app"); }}
+      onBack={() => setScreen("welcome")} />
+  );
+
+  if (screen === "app" && user?.tipo === "paciente") return (
+    <PainelPaciente user={user} consultas={consultas} psicologos={SEED_PSICOLOGOS}
+      onAgendar={addConsulta} onLogout={logout} />
+  );
+
+  if (screen === "app" && user?.tipo === "psicologo") return (
+    <PainelPsicologo user={user} consultas={consultas} pacientes={pacientes} notas={notas}
+      onStatusChange={updateStatus} onAddNota={addNota} onLogout={logout} />
+  );
+
+  return null;
+}
